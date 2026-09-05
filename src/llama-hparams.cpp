@@ -2212,6 +2212,39 @@ void llm_load_hparams(
                 }
 
             } break;
+        case LLM_ARCH_K2HORIZON:
+            {
+                ml.get_key(LLM_KV_ATTENTION_LAYERNORM_RMS_EPS, hparams.f_norm_rms_eps);
+                ml.get_key(LLM_KV_ATTENTION_GROUPNORM_GROUPS,  hparams.n_norm_groups, false);
+                hparams.f_norm_group_eps = hparams.f_norm_rms_eps;
+                if (hparams.n_norm_groups == 0) hparams.n_norm_groups = 1;
+
+                // moe
+                if (hparams.n_expert > 0) {
+                    ml.get_key(LLM_KV_EXPERT_FEED_FORWARD_LENGTH, hparams.n_ff_exp);
+                    ml.get_key(LLM_KV_LEADING_DENSE_BLOCK_COUNT, hparams.n_layer_dense_lead, false);
+                    ml.get_key(LLM_KV_INTERLEAVE_MOE_LAYER_STEP, hparams.moe_every_n_layers, false);
+                    ml.get_key(LLM_KV_EXPERT_SHARED_COUNT,       hparams.n_expert_shared, false);
+                    ml.get_key(LLM_KV_EXPERT_SHARED_FEED_FORWARD_LENGTH, hparams.n_ff_shexp, false);
+                    ml.get_key(LLM_KV_EXPERT_WEIGHTS_SCALE,      hparams.expert_weights_scale, false);
+                    ml.get_key(LLM_KV_EXPERT_WEIGHTS_NORM,       hparams.expert_weights_norm, false);
+                    ml.get_key(LLM_KV_EXPERT_GATING_FUNC,        hparams.expert_gating_func, false);
+                    if (hparams.expert_gating_func == LLM_EXPERT_GATING_FUNC_TYPE_NONE) {
+                        hparams.expert_gating_func = LLM_EXPERT_GATING_FUNC_SOFTMAX;
+                    }
+                }
+
+                // mova
+                ml.get_key(LLM_KV_ATTENTION_VALUE_EXPERT_COUNT,     hparams.n_value_expert, false);
+                ml.get_key(LLM_KV_ATTENTION_VALUE_EXPERT_USED_COUNT,hparams.n_value_expert_used, false);
+
+                switch (hparams.n_layer) {
+                    case 28: model.type = e_model::MODEL_1B;  break;
+                    case 48: model.type = e_model::MODEL_36B; break;
+                    default: model.type = e_model::MODEL_UNKNOWN;
+                }
+
+            } break;
         default: (void)0;
     }
 

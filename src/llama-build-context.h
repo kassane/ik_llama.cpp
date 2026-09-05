@@ -445,6 +445,8 @@ struct llm_build_context {
 
     ggml_cgraph * build_step35();
 
+    ggml_cgraph * build_k2horizon();
+
     ggml_tensor * build_step35_mtp(
             const llama_layer & mtp_layer,
             ggml_tensor * hidden_states_from_main_model,

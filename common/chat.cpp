@@ -2356,6 +2356,93 @@ static common_chat_params common_chat_params_init_cohere2moe(const common_chat_t
     return data;
 }
 
+// K2 Horizon (abenzerps/IFM template) — uses <ifm|think> tags and <ifm|tool_calls> format.
+// Detection: template has "<ifm|think>" and "<ifm|tool_calls>" markers.
+static common_chat_params common_chat_params_init_k2_horizon(const common_chat_template &    tmpl,
+                                                            const autoparser::generation_params & inputs) {
+    common_chat_params data;
+
+    data.prompt             = common_chat_template_direct_apply_impl(tmpl, inputs);
+    data.format             = COMMON_CHAT_FORMAT_PEG_NATIVE;
+    data.supports_thinking  = true;
+
+    const std::string THINK_START     = "<ifm|think>";
+    const std::string THINK_END       = "</ifm|think>";
+    const std::string TOOL_CALLS_BEGIN = "<ifm|tool_calls>";
+    const std::string TOOL_CALLS_END   = "</ifm|tool_calls>";
+    const std::string TOOL_CALL_BEGIN  = "<ifm|tool_call>";
+    const std::string TOOL_CALL_END    = "</ifm|tool_call>";
+
+    data.thinking_start_tag = THINK_START;
+    data.thinking_end_tag   = THINK_END;
+    data.preserved_tokens   = {
+        THINK_START, THINK_END,
+        TOOL_CALLS_BEGIN, TOOL_CALLS_END,
+        TOOL_CALL_BEGIN, TOOL_CALL_END,
+        "<ifm|arg_key>", "</ifm|arg_key>",
+        "<ifm|arg_value>", "</ifm|arg_value>",
+        "<ifm|arg_type>", "</ifm|arg_type>",
+    };
+
+    auto has_tools         = inputs.tools.is_array() && !inputs.tools.empty();
+    auto extract_reasoning = inputs.reasoning_format != COMMON_REASONING_FORMAT_NONE;
+    auto include_grammar   = has_tools && inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_NONE;
+
+    auto parser = build_chat_peg_parser([&](common_chat_peg_builder & p) {
+        auto end = p.end();
+
+        auto reasoning = extract_reasoning ? p.optional(THINK_START + p.reasoning(
+            p.until_one_of({ THINK_END, TOOL_CALLS_BEGIN })) +
+            p.optional(p.literal(THINK_END))) : p.eps();
+
+        auto generation_prompt = p.prefix(inputs.generation_prompt, THINK_START);
+
+        // Content only (no tools)
+        if (!has_tools || inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_NONE) {
+            return generation_prompt + reasoning + p.content(p.rest()) + end;
+        }
+
+        // Tools + content — use p.rule / p.trigger_rule with p.tool_open/p.tool_name/p.tool_args
+        auto tool_choice = p.choice();
+        foreach_function(inputs.tools, [&](const json & tool) {
+            const auto & function = tool.at("function");
+            std::string  name     = function.at("name");
+            const auto & schema   = function.at("parameters");
+
+            tool_choice |=
+                p.rule("tool-" + name, p.tool_open(p.tool_name(p.literal(name)) + p.tool_args(p.schema(p.json(), "tool-" + name + "-schema", schema))));
+        });
+
+        auto min_calls  = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED ? 1 : 0;
+        auto max_calls  = inputs.parallel_tool_calls ? -1 : 1;
+        auto tool_calls = p.trigger_rule("tool-call", p.repeat(TOOL_CALLS_BEGIN + tool_choice, min_calls, max_calls));
+
+        auto content_or_tools = p.content(p.until_one_of({ TOOL_CALLS_BEGIN })) +
+            p.optional(tool_calls) + p.content(p.rest());
+
+        return generation_prompt + reasoning + content_or_tools + end;
+    });
+
+    data.parser = parser.save();
+
+    if (include_grammar) {
+        data.grammar_lazy = has_tools && inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_AUTO;
+        data.grammar = build_grammar([&](const common_grammar_builder & builder) {
+            foreach_function(inputs.tools, [&](const json & tool) {
+                const auto & function = tool.at("function");
+                auto         schema   = function.at("parameters");
+                builder.resolve_refs(schema);
+            });
+            parser.build_grammar(builder, data.grammar_lazy);
+        });
+        data.grammar_triggers = {
+            { COMMON_GRAMMAR_TRIGGER_TYPE_WORD, TOOL_CALLS_BEGIN }
+        };
+    }
+
+    return data;
+}
+
 namespace workaround {
 
 static void map_developer_role_to_system(json & messages) {
@@ -2675,6 +2762,13 @@ std::optional<common_chat_params> common_chat_try_specialized_template(
         return common_chat_params_init_gemma4(tmpl, params);
     }
 
+
+    // K2 Horizon — uses <ifm|think> and <ifm|tool_calls> markers (abenzerps template)
+    if (src.find("<ifm|think>") != std::string::npos &&
+        src.find("<ifm|tool_calls>") != std::string::npos) {
+        LOG_DBG("Using specialized template: K2 Horizon\n");
+        return common_chat_params_init_k2_horizon(tmpl, params);
+    }
     return std::nullopt;
 }
 
