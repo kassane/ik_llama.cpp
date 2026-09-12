@@ -2402,81 +2402,31 @@ static common_chat_params common_chat_params_init_k2_horizon(const common_chat_t
             return generation_prompt + reasoning + p.content(p.rest()) + end;
         }
 
-        // Tools + content — XML-style <ifm|tool_call> with <ifm|arg_key>/<ifm|arg_value> pairs
+        // Tools + content — model generates:
+        //   <ifm|tool_calls><ifm|tool_call>NAME\n{json_args}</ifm|tool_call>...
+        // JSON args (not XML arg_key/arg_value), closing tags optional.
         auto tool_choice = p.choice();
         foreach_function(inputs.tools, [&](const json & tool) {
             const auto & function = tool.at("function");
             std::string  name     = function.at("name");
-            auto params   = function.contains("parameters") ? function.at("parameters") : json::object();
-            const auto & props    = params.contains("properties") ? params.at("properties") : json::object();
+            const auto & schema   = function.at("parameters");
 
-            std::set<std::string> required;
-            if (params.contains("required")) {
-                params.at("required").get_to(required);
-            }
-
-            auto schema_info = common_schema_info();
-            schema_info.resolve_refs(params);
-
-            // Build per-parameter parsers for XML <ifm|arg_key>NAME</ifm|arg_key><ifm|arg_value>VALUE</ifm|arg_value>
-            std::vector<common_peg_parser> required_parsers;
-            std::vector<common_peg_parser> optional_parsers;
-            for (const auto & [param_name, param_schema] : props.items()) {
-                bool is_required = required.find(param_name) != required.end();
-                bool is_string   = schema_info.resolves_to_string(param_schema);
-
-                auto arg = p.tool_arg(
-                    p.tool_arg_open(
-                        p.literal("<ifm|arg_key>") +
-                        p.tool_arg_name(p.literal(param_name)) +
-                        p.literal("</ifm|arg_key>\n<ifm|arg_value>")) +
-                    (is_string
-                        ? p.tool_arg_string_value(p.until("</ifm|arg_value>"))
-                        : p.tool_arg_json_value(p.schema(p.json(),
-                                                         "tool-" + name + "-arg-" + param_name + "-schema",
-                                                         param_schema, false))) +
-                    p.tool_arg_close(p.literal("</ifm|arg_value>")));
-
-                auto named_arg = p.rule("tool-" + name + "-arg-" + param_name, arg);
-                if (is_required) {
-                    required_parsers.push_back(named_arg);
-                } else {
-                    optional_parsers.push_back(named_arg);
-                }
-            }
-
-            // Assemble: required args first (in order), then optional in any order
-            common_peg_parser args_seq = p.eps();
-            for (size_t i = 0; i < required_parsers.size(); i++) {
-                if (i > 0) {
-                    args_seq = args_seq + p.space();
-                }
-                args_seq = args_seq + required_parsers[i];
-            }
-
-            if (!optional_parsers.empty()) {
-                common_peg_parser any_opt = p.choice();
-                for (const auto & opt : optional_parsers) {
-                    any_opt |= opt;
-                }
-                args_seq = args_seq + p.repeat(p.space() + any_opt, 0, -1);
-            }
-
-            // Full tool call: <ifm|tool_call>NAME\nARGS</ifm|tool_call>
+            // Match: <ifm|tool_call>NAME\n{json_args}</ifm|tool_call>
             auto func_parser = p.tool(
                 p.tool_open(p.literal(TOOL_CALL_BEGIN) + p.tool_name(p.literal(name)) + p.literal("\n")) +
-                p.space() + args_seq + p.space() +
-                p.tool_close(p.literal(TOOL_CALL_END)));
+                p.tool_args(p.schema(p.json(), "tool-" + name + "-schema", schema)) +
+                p.tool_close(p.optional(p.literal(TOOL_CALL_END))));
 
             tool_choice |= p.rule("tool-" + name, func_parser);
         });
 
         auto min_calls  = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED ? 1 : 0;
         auto max_calls  = inputs.parallel_tool_calls ? -1 : 1;
+        // Outer wrapper: <ifm|tool_calls> ... </ifm|tool_calls> (end tag optional — model often omits it)
         auto tool_calls = p.trigger_rule("tool-call",
             p.literal(TOOL_CALLS_BEGIN) + tool_choice +
             p.repeat(p.space() + tool_choice, 0, -1) +
-            p.literal(TOOL_CALLS_END));
+            p.optional(p.literal(TOOL_CALLS_END)));
 
         auto content_or_tools = p.content(p.until_one_of({ TOOL_CALLS_BEGIN })) +
             p.optional(tool_calls) + p.content(p.rest());
