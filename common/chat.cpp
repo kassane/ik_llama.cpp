@@ -2403,18 +2403,35 @@ static common_chat_params common_chat_params_init_k2_horizon(const common_chat_t
         }
 
         // Tools + content — model generates:
-        //   <ifm|tool_calls><ifm|tool_call>NAME\n{json_args}</ifm|tool_call>...
-        // JSON args (not XML arg_key/arg_value), closing tags optional.
+        //   <ifm|tool_calls><ifm|tool_call>NAME\n<ifm|arg_key>KEY</ifm|arg_key>\n<ifm|arg_value>VALUE</ifm|arg_value>...
+        // XML arg format with <ifm|arg_key>/<ifm|arg_value> tags, closing tags optional.
         auto tool_choice = p.choice();
         foreach_function(inputs.tools, [&](const json & tool) {
             const auto & function = tool.at("function");
             std::string  name     = function.at("name");
             const auto & schema   = function.at("parameters");
 
-            // Match: <ifm|tool_call>NAME\n{json_args}</ifm|tool_call>
+            // Match XML args: <ifm|arg_key>KEY</ifm|arg_key>\n<ifm|arg_value>VALUE</ifm|arg_value>
+            auto args = p.eps();
+            if (schema.contains("properties") && !schema["properties"].empty()) {
+                auto arg_choice = p.choice();
+                for (const auto & el : schema["properties"].items()) {
+                    const std::string & prop_name = el.key();
+                    auto arg_rule = p.tool_arg(
+                        p.tool_arg_open(p.literal("<ifm|arg_key>")) +
+                        p.tool_arg_name(p.literal(prop_name)) +
+                        p.literal("</ifm|arg_key>") +
+                        p.literal("\n") +
+                        p.literal("\n<ifm|arg_value>") + p.tool_arg_value(p.until("</ifm|arg_value>")) +
+                        p.literal("</ifm|arg_value>"));
+                    arg_choice |= arg_rule;
+                }
+                args = p.zero_or_more(arg_choice + p.space());
+            }
+
             auto func_parser = p.tool(
                 p.tool_open(p.literal(TOOL_CALL_BEGIN) + p.tool_name(p.literal(name)) + p.literal("\n")) +
-                p.tool_args(p.schema(p.json(), "tool-" + name + "-schema", schema)) +
+                p.tool_args(args) +
                 p.tool_close(p.optional(p.literal(TOOL_CALL_END))));
 
             tool_choice |= p.rule("tool-" + name, func_parser);
