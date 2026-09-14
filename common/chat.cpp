@@ -2423,9 +2423,11 @@ static common_chat_params common_chat_params_init_k2_horizon(const common_chat_t
         auto min_calls  = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED ? 1 : 0;
         auto max_calls  = inputs.parallel_tool_calls ? -1 : 1;
         // Outer wrapper: <ifm|tool_calls> ... </ifm|tool_calls> (end tag optional — model often omits it)
+        auto additional_calls = max_calls > 0 ? p.repeat(p.space() + tool_choice, 0, max_calls - 1) :
+                               p.repeat(p.space() + tool_choice, 0, -1);
         auto tool_calls = p.trigger_rule("tool-call",
             p.literal(TOOL_CALLS_BEGIN) + tool_choice +
-            p.repeat(p.space() + tool_choice, 0, -1) +
+            additional_calls +
             p.optional(p.literal(TOOL_CALLS_END)));
 
         auto content_or_tools = p.content(p.until_one_of({ TOOL_CALLS_BEGIN })) +
