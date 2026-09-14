@@ -703,6 +703,8 @@ const char * common_chat_format_name(common_chat_format format) {
             return "peg-gemma4";
         case COMMON_CHAT_FORMAT_PEG_MINIMAX_M3:
             return "peg-minimax-m3";
+        case COMMON_CHAT_FORMAT_PEG_K2HORIZON:
+            return "peg-k2horizon";
         default:
             throw std::runtime_error("Unknown chat format");
     }
@@ -2363,7 +2365,7 @@ static common_chat_params common_chat_params_init_k2_horizon(const common_chat_t
     common_chat_params data;
 
     data.prompt             = common_chat_template_direct_apply_impl(tmpl, inputs);
-    data.format             = COMMON_CHAT_FORMAT_PEG_NATIVE;
+    data.format             = COMMON_CHAT_FORMAT_PEG_K2HORIZON;
     data.supports_thinking  = true;
 
     const std::string THINK_START     = "<ifm|think>";
@@ -3022,6 +3024,8 @@ common_chat_msg common_chat_peg_parse(const common_peg_arena &          src_pars
                 mapper = std::make_unique<common_chat_peg_gemma4_mapper>(msg);
             } else if (params.format == COMMON_CHAT_FORMAT_PEG_MINIMAX_M3) {
                 mapper = std::make_unique<common_chat_peg_minimax_m3_mapper>(msg);
+            } else if (params.format == COMMON_CHAT_FORMAT_PEG_K2HORIZON) {
+                mapper = std::make_unique<common_chat_peg_k2horizon_mapper>(msg);
             } else {
                 mapper = std::make_unique<common_chat_peg_mapper>(msg);
             }
@@ -3045,6 +3049,8 @@ common_chat_msg common_chat_peg_parse(const common_peg_arena &          src_pars
         mapper = std::make_unique<common_chat_peg_gemma4_mapper>(msg);
     } else if (params.format == COMMON_CHAT_FORMAT_PEG_MINIMAX_M3) {
         mapper = std::make_unique<common_chat_peg_minimax_m3_mapper>(msg);
+    } else if (params.format == COMMON_CHAT_FORMAT_PEG_K2HORIZON) {
+        mapper = std::make_unique<common_chat_peg_k2horizon_mapper>(msg);
     } else {
         mapper = std::make_unique<common_chat_peg_mapper>(msg);
     }
