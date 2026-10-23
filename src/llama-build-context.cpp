@@ -190,6 +190,10 @@ ggml_cgraph * llm_build_context::build_k_shift() {
         if (kv_self.k_l[il] == nullptr) {
             continue;
         }
+        if (!hparams.has_rope(il)) {
+            // this layer never applies RoPE, so its cached keys must not be shifted either
+            continue;
+        }
         const int64_t n_head_kv = hparams.n_head_kv(il);
         const int64_t n_embd_head_k_l = hparams.n_embd_head_k(il);
         const int     n_rot_l = hparams.rope_n_rot(il);
@@ -3007,6 +3011,10 @@ ggml_cgraph * llm_build_context::llama_build_graph(
         case LLM_ARCH_MELLUM:
             {
                 result = llm.build_mellum();
+            } break;
+        case LLM_ARCH_FLINT:
+            {
+                result = llm.build_flint();
             } break;
         case LLM_ARCH_MAPLE:
             {

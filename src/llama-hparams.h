@@ -268,6 +268,7 @@ struct llama_hparams {
     enum llama_rope_scaling_type rope_scaling_type_train = LLAMA_ROPE_SCALING_TYPE_NONE;
 
     std::array<uint32_t, LLAMA_MAX_LAYERS> swa_layers;
+    std::array<uint32_t, LLAMA_MAX_LAYERS> rope_pattern;
 
     std::array<float, LLAMA_MAX_LAYERS> swiglu_limits;
     std::array<float, LLAMA_MAX_LAYERS> swiglu_limits_shared;
@@ -324,6 +325,7 @@ struct llama_hparams {
         if (this->ssm_n_group != other.ssm_n_group) return true;
         if (this->kda_safe_gate != other.kda_safe_gate) return true;
         if (this->recurrent_layer_arr != other.recurrent_layer_arr) return true;
+        if (this->rope_pattern        != other.rope_pattern)        return true;
         for (int i = 0; i < 8; ++i) {
             if (this->dflash_target_layer_ids[i] != other.dflash_target_layer_ids[i]) return true;
         }
@@ -471,6 +473,10 @@ struct llama_hparams {
 
     bool is_recurrent(uint32_t il) const {
         return il < n_layer ? recurrent_layer_arr[il] : false;
+    }
+
+    bool has_rope(uint32_t il) const {
+        return il < n_layer ? rope_pattern[il] != 0 : true;
     }
 
     bool is_ple(uint32_t il) const {
